@@ -36,8 +36,9 @@ public class CacheService : ICacheService
             var options = new DistributedCacheEntryOptions
             {
                 AbsoluteExpirationRelativeToNow = absoluteExpiration ?? TimeSpan.FromHours(1),
-                SlidingExpirationRelativeToNow = slidingExpiration ?? TimeSpan.FromMinutes(10)
+                SlidingExpiration = slidingExpiration ?? TimeSpan.FromMinutes(10) // Fix: Changed property name to SlidingExpiration
             };
+
             await _distributedCache.SetStringAsync(key, serializedString, options);
         }
         catch (Exception ex)

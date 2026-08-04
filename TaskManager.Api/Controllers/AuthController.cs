@@ -1,9 +1,6 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using TaskManager.Api.DTOs;
+using TaskManager.Api.Services;
 
 namespace TaskManager.Api.Controllers;
 
@@ -11,70 +8,42 @@ namespace TaskManager.Api.Controllers;
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
-    private readonly UserManager<IdentityUser> _userManager;
-    private readonly IConfiguration _configuration;
+    private readonly IAuthService _authService;
 
-    public AuthController(UserManager<IdentityUser> userManager, IConfiguration configuration)
+    public AuthController(IAuthService authService)
     {
-        _userManager = userManager;
-        _configuration = configuration;
+        _authService = authService;
     }
 
     // POST: api/auth/register
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterDto model)
     {
-        var userExists = await _userManager.FindByNameAsync(model.Username);
-        if (userExists != null) return BadRequest("User already exists.");
-
-        IdentityUser user = new()
+        var result = await _authService.RegisterAsync(model);
+        
+        if (!result.Succeeded)
         {
-            Email = model.Email,
-            SecurityStamp = Guid.NewGuid().ToString(),
-            UserName = model.Username
-        };
+            // Clean abstraction: handle duplicates or syntax criteria errors uniformally
+            var error = result.Errors.FirstOrDefault()?.Description ?? "Registration failed.";
+            return BadRequest(new { Message = error });
+        }
 
-        var result = await _userManager.CreateAsync(user, model.Password);
-        if (!result.Succeeded) return BadRequest(result.Errors);
-
-        return Ok("User created successfully!");
+        return Ok(new { Message = "User created successfully!" });
     }
 
     // POST: api/auth/login
     [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginDto model)
+    [ProducesResponseType(typeof(AuthResponseDto), 200)]
+    [ProducesResponseType(401)]
+    public async Task<ActionResult<AuthResponseDto>> Login([FromBody] LoginDto model)
     {
-        var user = await _userManager.FindByNameAsync(model.Username);
-        if (user != null && await _userManager.CheckPasswordAsync(user, model.Password))
+        var response = await _authService.LoginAsync(model);
+        
+        if (response == null)
         {
-            var authClaims = new List<Claim>
-            {
-                new Claim(ClaimTypes.Name, user.UserName!),
-                new Claim(ClaimTypes.NameIdentifier, user.Id),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            };
-
-            var authSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!));
-
-            // Construct the token with the correct parameter names
-            var token = new JwtSecurityToken(
-                issuer: _configuration["Jwt:Issuer"],
-                audience: _configuration["Jwt:Audience"],
-                expires: DateTime.Now.AddHours(3),
-                claims: authClaims,
-                signingCredentials: new SigningCredentials(authSigningKey, SecurityAlgorithms.HmacSha256) 
-            );
-
-
-            return Ok(new
-            {
-                token = new JwtSecurityTokenHandler().WriteToken(token),
-                expiration = token.ValidTo
-            });
+            return Unauthorized(new { Message = "Invalid username or password." });
         }
-        return Unauthorized();
+
+        return Ok(response);
     }
 }
-
-public record RegisterDto(string Username, string Email, string Password);
-public record LoginDto(string Username, string Password);

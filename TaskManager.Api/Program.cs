@@ -8,6 +8,7 @@ using TaskManager.Api.Hubs; // ("/taskhub"); // <-- 2. MAP THE HUB ROUTE HERE
 using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using TaskManager.Api.Services;
+using TaskManager.Api.Repositories;
 using TaskManager.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,7 +18,11 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString));
 
+// 1. Bind Jwt configuration block directly into our type safety Options schema object
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+
 // Register Services 
+builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITaskRepository, TaskRepository>();
 builder.Services.AddScoped<ICacheService, CacheService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
