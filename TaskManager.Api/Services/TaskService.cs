@@ -1,73 +1,44 @@
-using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Distributed;
-using TaskManager.Api.Data;
 using TaskManager.Api.DTOs;
 using TaskManager.Api.Models;
+using TaskManager.Api.Repositories;
 
 namespace TaskManager.Api.Services;
 
 public class TaskService : ITaskService
 {
-    private readonly AppDbContext _context;
-    private readonly IDistributedCache _cache;
+    private readonly ITaskRepository _repository;
+    private readonly ICacheService _cache;
 
-    public TaskService(AppDbContext context, IDistributedCache cache)
+    public TaskService(ITaskRepository repository, ICacheService cache)
     {
-        _context = context;
+        _repository = repository;
         _cache = cache;
     }
 
-    private static string GetCacheKey(string userId) => $"tasks_{userId}";
+    private static string GetTasksCacheKey(string userId) => $"tasks_{userId}";
 
     public async Task<IEnumerable<TaskResponseDto>> GetTasksAsync(string userId)
     {
-        string cacheKey = GetCacheKey(userId);
-        string? cachedJson = null;
+        string cacheKey = GetTasksCacheKey(userId);
+        
+        var cachedTasks = await _cache.GetAsync<List<TaskResponseDto>>(cacheKey);
+        if (cachedTasks != null) return cachedTasks;
 
-        try
-        {
-            cachedJson = await _cache.GetStringAsync(cacheKey);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Cache Warning] Redis Get failed: {ex.Message}");
-        }
+        var dbTasks = await _repository.GetAllByUserIdAsync(userId);
+        
+        var taskResponses = dbTasks
+            .Select(t => MapToResponseDto(t))
+            .ToList();
 
-        if (!string.IsNullOrEmpty(cachedJson))
-        {
-            return JsonSerializer.Deserialize<List<TaskResponseDto>>(cachedJson) ?? new List<TaskResponseDto>();
-        }
+        await _cache.SetAsync(cacheKey, taskResponses);
 
-        // Cache Miss / Redis offline: Query DB
-        var tasks = await _context.Tasks
-            .Where(t => t.UserId == userId)
-            .Select(t => new TaskResponseDto(t.Id, t.Title, t.Description, t.IsCompleted, t.CreatedAt))
-            .ToListAsync();
-
-        try
-        {
-            string serializedData = JsonSerializer.Serialize(tasks);
-            var cacheOptions = new DistributedCacheEntryOptions()
-                .SetAbsoluteExpiration(TimeSpan.FromHours(1))
-                .SetSlidingExpiration(TimeSpan.FromMinutes(10));
-
-            await _cache.SetStringAsync(cacheKey, serializedData, cacheOptions);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Cache Warning] Redis Set failed: {ex.Message}");
-        }
-
-        return tasks;
+        return taskResponses;
     }
 
     public async Task<TaskResponseDto?> GetTaskByIdAsync(int id, string userId)
     {
-        var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
-        if (task == null) return null;
-
-        return new TaskResponseDto(task.Id, task.Title, task.Description, task.IsCompleted, task.CreatedAt);
+        var task = await _repository.GetByIdAsync(id, userId);
+        return task == null ? null : MapToResponseDto(task);
     }
 
     public async Task<TaskResponseDto> CreateTaskAsync(CreateTaskDto dto, string userId)
@@ -80,50 +51,39 @@ public class TaskService : ITaskService
             UserId = userId
         };
 
-        _context.Tasks.Add(task);
-        await _context.SaveChangesAsync();
+        await _repository.AddAsync(task);
+        await _cache.RemoveAsync(GetTasksCacheKey(userId));
 
-        await EvictCacheAsync(userId);
-
-        return new TaskResponseDto(task.Id, task.Title, task.Description, task.IsCompleted, task.CreatedAt);
+        return MapToResponseDto(task);
     }
 
     public async Task<bool> UpdateTaskAsync(int id, UpdateTaskDto dto, string userId)
     {
-        var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+        var task = await _repository.GetByIdAsync(id, userId);
         if (task == null) return false;
 
         task.Title = dto.Title;
         task.Description = dto.Description;
         task.IsCompleted = dto.IsCompleted;
 
-        await _context.SaveChangesAsync();
-        await EvictCacheAsync(userId);
+        await _repository.UpdateAsync(task);
+        await _cache.RemoveAsync(GetTasksCacheKey(userId));
 
         return true;
     }
 
     public async Task<bool> DeleteTaskAsync(int id, string userId)
     {
-        var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+        var task = await _repository.GetByIdAsync(id, userId);
         if (task == null) return false;
 
-        _context.Tasks.Remove(task);
-        await _context.SaveChangesAsync();
-        await EvictCacheAsync(userId);
+        await _repository.DeleteAsync(task);
+        await _cache.RemoveAsync(GetTasksCacheKey(userId));
 
         return true;
     }
 
-    private async Task EvictCacheAsync(string userId)
-    {
-        try
-        {
-            await _cache.RemoveAsync(GetCacheKey(userId));
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Cache Warning] Redis Evict failed: {ex.Message}");
-        }
-    }
+    // DRY Principle: Centralized, reusable object mapping expression
+    private static TaskResponseDto MapToResponseDto(TodoTask task) =>
+        new(task.Id, task.Title, task.Description, task.IsCompleted, task.CreatedAt);
 }

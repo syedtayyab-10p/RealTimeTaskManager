@@ -17,6 +17,9 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString));
 
+// Register Services 
+builder.Services.AddScoped<ITaskRepository, TaskRepository>();
+builder.Services.AddScoped<ICacheService, CacheService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
 
 // 1. Add ASP.NET Core Identity using the built-in IdentityUser
