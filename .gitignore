@@ -488,3 +488,9 @@ obj/
 ## Standard .NET Core target build directories
 **/bin/
 **/obj/
+
+[Ob]
+TaskManager.Api/bin/
+TaskManager.Api/obj/
+TaskManager.Tests/bin/
+TaskManager.Tests/obj/
