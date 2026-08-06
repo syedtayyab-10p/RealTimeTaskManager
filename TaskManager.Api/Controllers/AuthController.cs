@@ -23,7 +23,6 @@ public class AuthController : ControllerBase
         
         if (!result.Succeeded)
         {
-            // Clean abstraction: handle duplicates or syntax criteria errors uniformally
             var error = result.Errors.FirstOrDefault()?.Description ?? "Registration failed.";
             return BadRequest(new { Message = error });
         }

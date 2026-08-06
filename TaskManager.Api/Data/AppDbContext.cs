@@ -15,7 +15,6 @@ public class AppDbContext : IdentityDbContext
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
-        // Crucial: IdentityDbContext requires this to map identity tables correctly
         base.OnModelCreating(builder);
     }
 }
